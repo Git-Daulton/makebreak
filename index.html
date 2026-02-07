@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tiny Voxel Sandbox</title>
+  <style>
+    :root {
+      --bg: #87b7db;
+      --ui-bg: rgba(0, 0, 0, 0.45);
+      --ui-text: #f4f4f4;
+      --ui-accent: #ffdc7a;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      color: var(--ui-text);
+    }
+
+    #app {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #crosshair {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      width: 14px;
+      height: 14px;
+      margin-left: -7px;
+      margin-top: -7px;
+      pointer-events: none;
+      opacity: 0.95;
+      z-index: 5;
+    }
+
+    #crosshair::before,
+    #crosshair::after {
+      content: "";
+      position: absolute;
+      background: #fff;
+      box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+    }
+
+    #crosshair::before {
+      left: 6px;
+      top: 1px;
+      width: 2px;
+      height: 12px;
+    }
+
+    #crosshair::after {
+      left: 1px;
+      top: 6px;
+      width: 12px;
+      height: 2px;
+    }
+
+    #hud {
+      position: fixed;
+      left: 12px;
+      bottom: 12px;
+      z-index: 6;
+      background: var(--ui-bg);
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.4;
+      min-width: 220px;
+    }
+
+    #help {
+      position: fixed;
+      left: 12px;
+      top: 12px;
+      z-index: 6;
+      background: var(--ui-bg);
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.5;
+      max-width: 300px;
+    }
+
+    #help.hidden {
+      display: none;
+    }
+
+    #lockHint {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      z-index: 6;
+      background: var(--ui-bg);
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+
+    .accent {
+      color: var(--ui-accent);
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="crosshair" aria-hidden="true"></div>
+
+  <div id="hud">
+    Selected: <span id="selectedBlock" class="accent">1</span>
+  </div>
+
+  <div id="help">
+    <div><strong>Controls</strong> (press <span class="accent">H</span> to toggle)</div>
+    <div>Click canvas: lock pointer</div>
+    <div>Mouse: look</div>
+    <div>WASD: move</div>
+    <div>Space: jump</div>
+    <div>Left click: break block</div>
+    <div>Right click: place block</div>
+    <div>1-6: select block type</div>
+    <div>Esc: unlock pointer</div>
+  </div>
+
+  <div id="lockHint">Click to capture mouse</div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

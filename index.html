@@ -111,6 +111,56 @@
       font-size: 13px;
     }
 
+    #hotbar {
+      position: fixed;
+      left: 50%;
+      bottom: 14px;
+      transform: translateX(-50%);
+      z-index: 7;
+      display: flex;
+      gap: 6px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.38);
+      pointer-events: none;
+    }
+
+    .hotbar-slot {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      border: 2px solid rgba(255, 255, 255, 0.35);
+      background: rgba(255, 255, 255, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      transition: border-color 0.1s ease, transform 0.1s ease, box-shadow 0.1s ease;
+    }
+
+    .hotbar-slot.selected {
+      border-color: #ffe9a3;
+      box-shadow: 0 0 10px rgba(255, 221, 128, 0.45);
+      transform: translateY(-2px);
+    }
+
+    .hotbar-preview {
+      width: 22px;
+      height: 22px;
+      border-radius: 4px;
+      border: 1px solid rgba(0, 0, 0, 0.45);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+    }
+
+    .hotbar-key {
+      position: absolute;
+      left: 3px;
+      top: 2px;
+      font-size: 10px;
+      line-height: 1;
+      color: rgba(255, 255, 255, 0.8);
+    }
+
     .accent {
       color: var(--ui-accent);
       font-weight: 600;
@@ -136,7 +186,8 @@
     <div>Space: jump</div>
     <div>Left click: hold to break block</div>
     <div>Right click: place block</div>
-    <div>1-0: select block type (0 = slot 10)</div>
+    <div>Mouse wheel: cycle hotbar selection</div>
+    <div>1-9: select hotbar slot</div>
     <div>M: mute/unmute audio</div>
     <div>
       Volume:
@@ -146,6 +197,7 @@
   </div>
 
   <div id="lockHint">Click to capture mouse</div>
+  <div id="hotbar" aria-label="Block hotbar"></div>
 
   <script type="module" src="./main.js"></script>
 </body>

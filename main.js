@@ -27,6 +27,7 @@ const AIR_FRICTION = 1.6;
 
 const FPS_SAMPLE_COUNT = 30;
 const HUD_UPDATE_INTERVAL = 0.15;
+const HOTBAR_SLOT_COUNT = 9;
 
 const BLOCK = {
   AIR: 0,
@@ -292,10 +293,36 @@ miningOverlay.visible = false;
 miningOverlay.renderOrder = 999;
 scene.add(miningOverlay);
 
+const targetOutlineMaterial = new THREE.MeshBasicMaterial({
+  color: 0x111111,
+  wireframe: true,
+  transparent: true,
+  opacity: 0.95,
+  depthTest: false,
+  depthWrite: false,
+});
+const targetOutline = new THREE.Mesh(new THREE.BoxGeometry(1.01, 1.01, 1.01), targetOutlineMaterial);
+targetOutline.visible = false;
+targetOutline.renderOrder = 950;
+scene.add(targetOutline);
+
 const chunkMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 const chunkMeshes = new Array(CHUNK_X * CHUNK_Y * CHUNK_Z).fill(null);
 
 const colorScratch = new THREE.Color();
+
+function hash3(x, y, z) {
+  let h = (x * 374761393 + y * 668265263 + z * 2147483647) | 0;
+  h ^= h >>> 13;
+  h = (h * 1274126177) | 0;
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+function getBlockColorMultiplier(x, y, z) {
+  const h = hash3(x, y, z);
+  return 0.93 + ((h & 255) / 255) * 0.14;
+}
 
 function buildChunkGeometry(cx, cy, cz) {
   const { x: startX, y: startY, z: startZ } = chunkOrigin(cx, cy, cz);
@@ -317,6 +344,10 @@ function buildChunkGeometry(cx, cy, cz) {
         }
 
         colorScratch.setHex(BLOCK_COLORS[type]);
+        const colorMul = getBlockColorMultiplier(x, y, z);
+        const r = Math.min(1, colorScratch.r * colorMul);
+        const g = Math.min(1, colorScratch.g * colorMul);
+        const b = Math.min(1, colorScratch.b * colorMul);
 
         for (const face of FACE_DEFS) {
           const nx = x + face.normal[0];
@@ -328,7 +359,7 @@ function buildChunkGeometry(cx, cy, cz) {
 
           for (const corner of face.corners) {
             positions.push(x + corner[0], y + corner[1], z + corner[2]);
-            colors.push(colorScratch.r, colorScratch.g, colorScratch.b);
+            colors.push(r, g, b);
           }
 
           indices.push(
@@ -450,11 +481,106 @@ const volumeValueLabel = document.getElementById("volumeValue");
 const volumeSlider = document.getElementById("volumeSlider");
 const helpPanel = document.getElementById("help");
 const lockHint = document.getElementById("lockHint");
+const hotbarElement = document.getElementById("hotbar");
 
-let selectedBlock = BLOCK.GRASS;
+const availableBlockIds = Object.keys(BLOCK_NAMES)
+  .map(Number)
+  .sort((a, b) => a - b);
+const hotbarBlockIds = new Array(HOTBAR_SLOT_COUNT).fill(availableBlockIds[0] ?? BLOCK.GRASS);
+const hotbarSlotElements = [];
+
+let hotbarStartIndex = 0;
+let selectedHotbarIndex = 0;
+let selectedBlock = hotbarBlockIds[selectedHotbarIndex];
 
 function updateSelectionHud() {
-  selectedLabel.textContent = `${selectedBlock} (${BLOCK_NAMES[selectedBlock]})`;
+  selectedLabel.textContent = `${selectedBlock} (${BLOCK_NAMES[selectedBlock] ?? "Unknown"})`;
+}
+
+function wrapIndex(i, len) {
+  if (len <= 0) {
+    return 0;
+  }
+  return ((i % len) + len) % len;
+}
+
+function createHotbarSlots() {
+  if (!hotbarElement || hotbarSlotElements.length > 0) {
+    return;
+  }
+
+  hotbarElement.innerHTML = "";
+  for (let i = 0; i < HOTBAR_SLOT_COUNT; i++) {
+    const slot = document.createElement("div");
+    slot.className = "hotbar-slot";
+
+    const key = document.createElement("span");
+    key.className = "hotbar-key";
+    key.textContent = String(i + 1);
+
+    const preview = document.createElement("div");
+    preview.className = "hotbar-preview";
+
+    slot.appendChild(key);
+    slot.appendChild(preview);
+    hotbarElement.appendChild(slot);
+    hotbarSlotElements.push({ slot, preview });
+  }
+}
+
+function renderHotbar() {
+  if (!hotbarElement) {
+    return;
+  }
+
+  createHotbarSlots();
+  for (let i = 0; i < HOTBAR_SLOT_COUNT; i++) {
+    const item = hotbarSlotElements[i];
+    const blockId = hotbarBlockIds[i];
+    if (!item || blockId == null) {
+      continue;
+    }
+
+    item.slot.classList.toggle("selected", i === selectedHotbarIndex);
+    item.slot.title = `${i + 1}: ${BLOCK_NAMES[blockId] ?? `Block ${blockId}`}`;
+    const colorHex = BLOCK_COLORS[blockId] ?? 0xffffff;
+    item.preview.style.backgroundColor = `#${colorHex.toString(16).padStart(6, "0")}`;
+  }
+}
+
+function rebuildHotbarWindow() {
+  const count = availableBlockIds.length;
+  if (count === 0) {
+    return;
+  }
+
+  for (let slot = 0; slot < HOTBAR_SLOT_COUNT; slot++) {
+    hotbarBlockIds[slot] = availableBlockIds[wrapIndex(hotbarStartIndex + slot, count)];
+  }
+
+  selectedBlock = hotbarBlockIds[selectedHotbarIndex] ?? availableBlockIds[0];
+  updateSelectionHud();
+  renderHotbar();
+}
+
+function shiftHotbarSelection(direction) {
+  if (direction === 0 || availableBlockIds.length === 0) {
+    return;
+  }
+
+  if (direction > 0) {
+    if (selectedHotbarIndex < HOTBAR_SLOT_COUNT - 1) {
+      selectedHotbarIndex += 1;
+    } else {
+      hotbarStartIndex = wrapIndex(hotbarStartIndex + 1, availableBlockIds.length);
+    }
+  } else if (selectedHotbarIndex > 0) {
+    selectedHotbarIndex -= 1;
+  } else {
+    hotbarStartIndex = wrapIndex(hotbarStartIndex - 1, availableBlockIds.length);
+  }
+
+  rebuildHotbarWindow();
 }
 
 let audioContext = null;
@@ -589,7 +715,7 @@ function getBreakTime(blockId) {
   return BREAK_TIME_BY_ID[blockId] ?? 1.0;
 }
 
-updateSelectionHud();
+rebuildHotbarWindow();
 updateAudioHud();
 
 volumeSlider.addEventListener("input", (e) => {
@@ -660,6 +786,7 @@ document.addEventListener("pointerlockchange", () => {
     isMining = false;
     miningOverlay.visible = false;
     miningOverlayMaterial.opacity = 0;
+    hideTargetOutline();
   }
 });
 
@@ -695,10 +822,10 @@ window.addEventListener("keydown", (e) => {
     toggleMute();
   }
 
-  if (/^Digit[0-9]$/.test(e.code)) {
-    const digit = Number(e.code.slice(5));
-    selectedBlock = digit === 0 ? 10 : digit;
-    updateSelectionHud();
+  const digitMatch = /^Digit([1-9])$/.exec(e.code);
+  if (digitMatch) {
+    selectedHotbarIndex = Number(digitMatch[1]) - 1;
+    rebuildHotbarWindow();
   }
 });
 
@@ -707,6 +834,24 @@ window.addEventListener("keyup", (e) => {
     keys[e.code] = false;
   }
 });
+
+renderer.domElement.addEventListener(
+  "wheel",
+  (e) => {
+    if (!pointerLocked) {
+      return;
+    }
+
+    if (e.deltaY === 0) {
+      return;
+    }
+
+    const direction = e.deltaY > 0 ? 1 : -1;
+    shiftHotbarSelection(direction);
+    e.preventDefault();
+  },
+  { passive: false }
+);
 
 renderer.domElement.addEventListener("contextmenu", (e) => {
   e.preventDefault();
@@ -723,6 +868,21 @@ function sameBlock(a, b) {
 function hideMiningOverlay() {
   miningOverlay.visible = false;
   miningOverlayMaterial.opacity = 0;
+}
+
+function hideTargetOutline() {
+  targetOutline.visible = false;
+}
+
+function updateTargetOutline(target) {
+  if (!target || !target.hit) {
+    hideTargetOutline();
+    return;
+  }
+
+  const { x, y, z } = target.hit;
+  targetOutline.position.set(x + 0.5, y + 0.5, z + 0.5);
+  targetOutline.visible = true;
 }
 
 function clearMiningState() {
@@ -792,7 +952,7 @@ function getTargetedBlock() {
   return null;
 }
 
-function updateMining(dt, nowMs) {
+function updateMining(dt, nowMs, target) {
   if (
     miningBlock &&
     getBlock(miningBlock.x, miningBlock.y, miningBlock.z) === BLOCK.AIR
@@ -801,14 +961,9 @@ function updateMining(dt, nowMs) {
     return;
   }
 
-  let target = null;
-  if (lmbDown || miningBlock) {
-    target = getTargetedBlock();
-  }
-
   let targetHit = null;
   let targetBlockId = BLOCK.AIR;
-  if (target && target.hit) {
+  if ((lmbDown || miningBlock) && target && target.hit) {
     targetHit = target.hit;
     targetBlockId = getBlock(targetHit.x, targetHit.y, targetHit.z);
     if (targetBlockId === BLOCK.AIR) {
@@ -922,6 +1077,7 @@ window.addEventListener("blur", () => {
   lmbDown = false;
   isMining = false;
   hideMiningOverlay();
+  hideTargetOutline();
 });
 
 function overlapSolid(minX, minY, minZ, maxX, maxY, maxZ) {
@@ -1040,6 +1196,8 @@ function updateFps(dt) {
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.033);
   const nowMs = performance.now();
+  const currentTarget = getTargetedBlock();
+  updateTargetOutline(currentTarget);
 
   forward.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
   right.set(-forward.z, 0, forward.x);
@@ -1082,7 +1240,7 @@ function tick() {
 
   moveAndCollide(dt);
   updateCamera();
-  updateMining(dt, nowMs);
+  updateMining(dt, nowMs, currentTarget);
 
   const fps = updateFps(dt);
   hudTimer += dt;

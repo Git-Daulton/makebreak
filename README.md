@@ -16,7 +16,7 @@ Original tiny browser voxel sandbox built with Three.js (CDN) and plain HTML/JS.
 - Mouse: look
 - WASD: move
 - Space: jump
-- Left click: break targeted block
+- Left click: hold to break targeted block
 - Right click: place selected block on targeted face
 - 1-0: select block type (0 selects slot 10)
 - M: mute/unmute audio

@@ -81,6 +81,25 @@ const BREAK_SOUND_PROFILE = {
   [BLOCK.SNOW]: { cutoff: 600, q: 0.5, gain: 0.028, decay: 0.13 },
 };
 
+const BREAK_TIME_BY_ID = {
+  [BLOCK.GRASS]: 0.45,
+  [BLOCK.DIRT]: 0.45,
+  [BLOCK.SAND]: 0.45,
+  [BLOCK.WOOD]: 0.9,
+  [BLOCK.STONE]: 1.35,
+  [BLOCK.PLANK]: 0.8,
+  [BLOCK.BRICK]: 1.25,
+  [BLOCK.LEAF]: 0.3,
+  [BLOCK.CLAY]: 0.7,
+  [BLOCK.SNOW]: 0.25,
+};
+
+const MINING_FORGET_MS = 2000;
+const MINING_OVERLAY_MIN_OPACITY = 0.12;
+const MINING_OVERLAY_MAX_OPACITY = 0.72;
+const MINING_OVERLAY_MIN_SCALE = 1.01;
+const MINING_OVERLAY_MAX_SCALE = 1.08;
+
 const FACE_DEFS = [
   {
     normal: [1, 0, 0],
@@ -259,6 +278,19 @@ function parseChunkKey(key) {
 
 const chunkGroup = new THREE.Group();
 scene.add(chunkGroup);
+
+const miningOverlayMaterial = new THREE.MeshBasicMaterial({
+  color: 0xffffff,
+  transparent: true,
+  opacity: 0,
+  depthTest: false,
+  depthWrite: false,
+  wireframe: true,
+});
+const miningOverlay = new THREE.Mesh(new THREE.BoxGeometry(1.01, 1.01, 1.01), miningOverlayMaterial);
+miningOverlay.visible = false;
+miningOverlay.renderOrder = 999;
+scene.add(miningOverlay);
 
 const chunkMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 const chunkMeshes = new Array(CHUNK_X * CHUNK_Y * CHUNK_Z).fill(null);
@@ -553,6 +585,10 @@ function playBreakSound(type) {
   src.stop(now + profile.decay + 0.02);
 }
 
+function getBreakTime(blockId) {
+  return BREAK_TIME_BY_ID[blockId] ?? 1.0;
+}
+
 updateSelectionHud();
 updateAudioHud();
 
@@ -604,6 +640,12 @@ const keys = {
 };
 
 let pointerLocked = false;
+let lmbDown = false;
+let isMining = false;
+let miningBlock = null;
+let miningBlockId = BLOCK.AIR;
+let miningProgressSec = 0;
+let miningLastContactTimeMs = 0;
 
 renderer.domElement.addEventListener("click", () => {
   initializeAudioOnGesture();
@@ -613,6 +655,12 @@ renderer.domElement.addEventListener("click", () => {
 document.addEventListener("pointerlockchange", () => {
   pointerLocked = document.pointerLockElement === renderer.domElement;
   lockHint.style.display = pointerLocked ? "none" : "block";
+  if (!pointerLocked) {
+    lmbDown = false;
+    isMining = false;
+    miningOverlay.visible = false;
+    miningOverlayMaterial.opacity = 0;
+  }
 });
 
 document.addEventListener("mousemove", (e) => {
@@ -668,6 +716,48 @@ const raycaster = new THREE.Raycaster();
 raycaster.far = REACH;
 const centerScreen = new THREE.Vector2(0, 0);
 
+function sameBlock(a, b) {
+  return !!a && !!b && a.x === b.x && a.y === b.y && a.z === b.z;
+}
+
+function hideMiningOverlay() {
+  miningOverlay.visible = false;
+  miningOverlayMaterial.opacity = 0;
+}
+
+function clearMiningState() {
+  isMining = false;
+  miningBlock = null;
+  miningBlockId = BLOCK.AIR;
+  miningProgressSec = 0;
+  miningLastContactTimeMs = 0;
+  hideMiningOverlay();
+}
+
+function setMiningTarget(targetCoords, blockId, nowMs) {
+  miningBlock = { x: targetCoords.x, y: targetCoords.y, z: targetCoords.z };
+  miningBlockId = blockId;
+  miningProgressSec = 0;
+  miningLastContactTimeMs = nowMs;
+}
+
+function updateMiningOverlay(progress01) {
+  if (!miningBlock) {
+    return;
+  }
+
+  const t = Math.min(Math.max(progress01, 0), 1);
+  const scale =
+    MINING_OVERLAY_MIN_SCALE + (MINING_OVERLAY_MAX_SCALE - MINING_OVERLAY_MIN_SCALE) * t;
+  const opacity =
+    MINING_OVERLAY_MIN_OPACITY + (MINING_OVERLAY_MAX_OPACITY - MINING_OVERLAY_MIN_OPACITY) * t;
+
+  miningOverlay.position.set(miningBlock.x + 0.5, miningBlock.y + 0.5, miningBlock.z + 0.5);
+  miningOverlay.scale.setScalar(scale);
+  miningOverlayMaterial.opacity = opacity;
+  miningOverlay.visible = true;
+}
+
 function getTargetedBlock() {
   raycaster.setFromCamera(centerScreen, camera);
   const hits = raycaster.intersectObjects(chunkGroup.children, false);
@@ -702,6 +792,63 @@ function getTargetedBlock() {
   return null;
 }
 
+function updateMining(dt, nowMs) {
+  if (
+    miningBlock &&
+    getBlock(miningBlock.x, miningBlock.y, miningBlock.z) === BLOCK.AIR
+  ) {
+    clearMiningState();
+    return;
+  }
+
+  let target = null;
+  if (lmbDown || miningBlock) {
+    target = getTargetedBlock();
+  }
+
+  let targetHit = null;
+  let targetBlockId = BLOCK.AIR;
+  if (target && target.hit) {
+    targetHit = target.hit;
+    targetBlockId = getBlock(targetHit.x, targetHit.y, targetHit.z);
+    if (targetBlockId === BLOCK.AIR) {
+      targetHit = null;
+    }
+  }
+
+  const activelyHitting = lmbDown && targetHit !== null;
+  if (activelyHitting) {
+    if (!sameBlock(miningBlock, targetHit) || miningBlockId !== targetBlockId) {
+      setMiningTarget(targetHit, targetBlockId, nowMs);
+    }
+
+    isMining = true;
+    miningProgressSec += dt;
+    miningLastContactTimeMs = nowMs;
+
+    const breakTime = getBreakTime(miningBlockId);
+    const progress01 = Math.min(miningProgressSec / breakTime, 1);
+    updateMiningOverlay(progress01);
+
+    if (miningProgressSec >= breakTime && miningBlock) {
+      const brokenType = miningBlockId;
+      const { x, y, z } = miningBlock;
+      if (applyBlockChange(x, y, z, BLOCK.AIR)) {
+        playBreakSound(brokenType);
+      }
+      clearMiningState();
+    }
+    return;
+  }
+
+  isMining = false;
+  hideMiningOverlay();
+
+  if (miningBlock && nowMs - miningLastContactTimeMs > MINING_FORGET_MS) {
+    clearMiningState();
+  }
+}
+
 function intersectsPlayer(x, y, z) {
   const minX = x;
   const maxX = x + 1;
@@ -725,23 +872,6 @@ function intersectsPlayer(x, y, z) {
     pMaxZ > minZ &&
     pMinZ < maxZ
   );
-}
-
-function tryBreakBlock() {
-  const target = getTargetedBlock();
-  if (!target) {
-    return;
-  }
-
-  const { x, y, z } = target.hit;
-  const existingType = getBlock(x, y, z);
-  if (existingType === BLOCK.AIR) {
-    return;
-  }
-
-  if (applyBlockChange(x, y, z, BLOCK.AIR)) {
-    playBreakSound(existingType);
-  }
 }
 
 function tryPlaceBlock() {
@@ -774,10 +904,24 @@ window.addEventListener("mousedown", (e) => {
   initializeAudioOnGesture();
 
   if (e.button === 0) {
-    tryBreakBlock();
+    lmbDown = true;
   } else if (e.button === 2) {
     tryPlaceBlock();
   }
+});
+
+window.addEventListener("mouseup", (e) => {
+  if (e.button === 0) {
+    lmbDown = false;
+    isMining = false;
+    hideMiningOverlay();
+  }
+});
+
+window.addEventListener("blur", () => {
+  lmbDown = false;
+  isMining = false;
+  hideMiningOverlay();
 });
 
 function overlapSolid(minX, minY, minZ, maxX, maxY, maxZ) {
@@ -895,6 +1039,7 @@ function updateFps(dt) {
 
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.033);
+  const nowMs = performance.now();
 
   forward.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
   right.set(-forward.z, 0, forward.x);
@@ -937,6 +1082,7 @@ function tick() {
 
   moveAndCollide(dt);
   updateCamera();
+  updateMining(dt, nowMs);
 
   const fps = updateFps(dt);
   hudTimer += dt;

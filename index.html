@@ -123,7 +123,9 @@
   <div id="crosshair" aria-hidden="true"></div>
 
   <div id="hud">
-    Selected: <span id="selectedBlock" class="accent">1</span>
+    <div>Selected: <span id="selectedBlock" class="accent">1 (Grass)</span></div>
+    <div>FPS: <span id="fpsValue" class="accent">0.0</span></div>
+    <div>Audio: <span id="audioMuted" class="accent">Unmuted</span> (<span id="volumeValue" class="accent">80%</span>)</div>
   </div>
 
   <div id="help">
@@ -134,7 +136,12 @@
     <div>Space: jump</div>
     <div>Left click: break block</div>
     <div>Right click: place block</div>
-    <div>1-6: select block type</div>
+    <div>1-0: select block type (0 = slot 10)</div>
+    <div>M: mute/unmute audio</div>
+    <div>
+      Volume:
+      <input id="volumeSlider" type="range" min="0" max="100" value="80" />
+    </div>
     <div>Esc: unlock pointer</div>
   </div>
 

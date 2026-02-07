@@ -5,15 +5,28 @@ const WORLD_Y = 32;
 const WORLD_Z = 64;
 const WORLD_SIZE = WORLD_X * WORLD_Y * WORLD_Z;
 
+const CHUNK_SIZE = 16;
+const CHUNK_X = WORLD_X / CHUNK_SIZE;
+const CHUNK_Y = WORLD_Y / CHUNK_SIZE;
+const CHUNK_Z = WORLD_Z / CHUNK_SIZE;
+
 const REACH = 6;
 
 const PLAYER_HEIGHT = 1.75;
 const PLAYER_RADIUS = 0.35;
 const EYE_OFFSET = 1.62;
 
-const GRAVITY = 24;
-const MOVE_SPEED = 6.5;
-const JUMP_SPEED = 8.5;
+const GRAVITY = 30;
+const MAX_FALL_SPEED = 30;
+const JUMP_SPEED = 9.2;
+const MAX_MOVE_SPEED = 7.2;
+const GROUND_ACCEL = 55;
+const AIR_ACCEL = 16;
+const GROUND_FRICTION = 12;
+const AIR_FRICTION = 1.6;
+
+const FPS_SAMPLE_COUNT = 30;
+const HUD_UPDATE_INTERVAL = 0.15;
 
 const BLOCK = {
   AIR: 0,
@@ -23,6 +36,10 @@ const BLOCK = {
   SAND: 4,
   WOOD: 5,
   PLANK: 6,
+  BRICK: 7,
+  LEAF: 8,
+  CLAY: 9,
+  SNOW: 10,
 };
 
 const BLOCK_NAMES = {
@@ -32,6 +49,10 @@ const BLOCK_NAMES = {
   4: "Sand",
   5: "Wood",
   6: "Plank",
+  7: "Brick",
+  8: "Leaf",
+  9: "Clay",
+  10: "Snow",
 };
 
 const BLOCK_COLORS = {
@@ -41,7 +62,81 @@ const BLOCK_COLORS = {
   [BLOCK.SAND]: 0xccb777,
   [BLOCK.WOOD]: 0x865b36,
   [BLOCK.PLANK]: 0xc29762,
+  [BLOCK.BRICK]: 0xa24b43,
+  [BLOCK.LEAF]: 0x3d7c3e,
+  [BLOCK.CLAY]: 0xad776f,
+  [BLOCK.SNOW]: 0xe8f1f5,
 };
+
+const BREAK_SOUND_PROFILE = {
+  [BLOCK.GRASS]: { cutoff: 1400, q: 0.7, gain: 0.055, decay: 0.08 },
+  [BLOCK.DIRT]: { cutoff: 900, q: 0.7, gain: 0.045, decay: 0.1 },
+  [BLOCK.STONE]: { cutoff: 2600, q: 1.2, gain: 0.07, decay: 0.055 },
+  [BLOCK.SAND]: { cutoff: 800, q: 0.6, gain: 0.04, decay: 0.11 },
+  [BLOCK.WOOD]: { cutoff: 1700, q: 1.0, gain: 0.06, decay: 0.07 },
+  [BLOCK.PLANK]: { cutoff: 1800, q: 1.0, gain: 0.06, decay: 0.075 },
+  [BLOCK.BRICK]: { cutoff: 2200, q: 1.1, gain: 0.065, decay: 0.06 },
+  [BLOCK.LEAF]: { cutoff: 700, q: 0.5, gain: 0.03, decay: 0.12 },
+  [BLOCK.CLAY]: { cutoff: 1200, q: 0.8, gain: 0.05, decay: 0.09 },
+  [BLOCK.SNOW]: { cutoff: 600, q: 0.5, gain: 0.028, decay: 0.13 },
+};
+
+const FACE_DEFS = [
+  {
+    normal: [1, 0, 0],
+    corners: [
+      [1, 0, 0],
+      [1, 1, 0],
+      [1, 1, 1],
+      [1, 0, 1],
+    ],
+  },
+  {
+    normal: [-1, 0, 0],
+    corners: [
+      [0, 0, 1],
+      [0, 1, 1],
+      [0, 1, 0],
+      [0, 0, 0],
+    ],
+  },
+  {
+    normal: [0, 1, 0],
+    corners: [
+      [0, 1, 1],
+      [1, 1, 1],
+      [1, 1, 0],
+      [0, 1, 0],
+    ],
+  },
+  {
+    normal: [0, -1, 0],
+    corners: [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 0, 1],
+      [0, 0, 1],
+    ],
+  },
+  {
+    normal: [0, 0, 1],
+    corners: [
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+      [0, 1, 1],
+    ],
+  },
+  {
+    normal: [0, 0, -1],
+    corners: [
+      [1, 0, 0],
+      [0, 0, 0],
+      [0, 1, 0],
+      [1, 1, 0],
+    ],
+  },
+];
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87b7db);
@@ -117,7 +212,6 @@ function generateWorld() {
     }
   }
 
-  // Wood pillar landmarks
   const pillars = [
     [10, 10],
     [22, 48],
@@ -134,67 +228,194 @@ function generateWorld() {
   }
 }
 
-generateWorld();
-
-const blockGroup = new THREE.Group();
-scene.add(blockGroup);
-
-const cubeGeometry = new THREE.BoxGeometry(1, 1, 1);
-
-const materials = {
-  [BLOCK.GRASS]: new THREE.MeshLambertMaterial({ color: BLOCK_COLORS[BLOCK.GRASS] }),
-  [BLOCK.DIRT]: new THREE.MeshLambertMaterial({ color: BLOCK_COLORS[BLOCK.DIRT] }),
-  [BLOCK.STONE]: new THREE.MeshLambertMaterial({ color: BLOCK_COLORS[BLOCK.STONE] }),
-  [BLOCK.SAND]: new THREE.MeshLambertMaterial({ color: BLOCK_COLORS[BLOCK.SAND] }),
-  [BLOCK.WOOD]: new THREE.MeshLambertMaterial({ color: BLOCK_COLORS[BLOCK.WOOD] }),
-  [BLOCK.PLANK]: new THREE.MeshLambertMaterial({ color: BLOCK_COLORS[BLOCK.PLANK] }),
-};
-
-const meshesByCell = new Map();
-
-function key(x, y, z) {
-  return `${x},${y},${z}`;
+function chunkCoord(v) {
+  return Math.floor(v / CHUNK_SIZE);
 }
 
-function rebuildWorldMeshes() {
-  for (const m of meshesByCell.values()) {
-    blockGroup.remove(m);
-  }
-  meshesByCell.clear();
+function chunkIndex(cx, cy, cz) {
+  return cx + CHUNK_X * (cz + CHUNK_Z * cy);
+}
 
-  for (let x = 0; x < WORLD_X; x++) {
-    for (let y = 0; y < WORLD_Y; y++) {
-      for (let z = 0; z < WORLD_Z; z++) {
-        const t = getBlock(x, y, z);
-        if (t !== BLOCK.AIR) {
-          addMeshForBlock(x, y, z, t);
+function chunkKey(cx, cy, cz) {
+  return `${cx},${cy},${cz}`;
+}
+
+function chunkOrigin(cx, cy, cz) {
+  return {
+    x: cx * CHUNK_SIZE,
+    y: cy * CHUNK_SIZE,
+    z: cz * CHUNK_SIZE,
+  };
+}
+
+function validChunk(cx, cy, cz) {
+  return cx >= 0 && cx < CHUNK_X && cy >= 0 && cy < CHUNK_Y && cz >= 0 && cz < CHUNK_Z;
+}
+
+function parseChunkKey(key) {
+  const [cx, cy, cz] = key.split(",").map(Number);
+  return { cx, cy, cz };
+}
+
+const chunkGroup = new THREE.Group();
+scene.add(chunkGroup);
+
+const chunkMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+const chunkMeshes = new Array(CHUNK_X * CHUNK_Y * CHUNK_Z).fill(null);
+
+const colorScratch = new THREE.Color();
+
+function buildChunkGeometry(cx, cy, cz) {
+  const { x: startX, y: startY, z: startZ } = chunkOrigin(cx, cy, cz);
+  const endX = Math.min(startX + CHUNK_SIZE, WORLD_X);
+  const endY = Math.min(startY + CHUNK_SIZE, WORLD_Y);
+  const endZ = Math.min(startZ + CHUNK_SIZE, WORLD_Z);
+
+  const positions = [];
+  const colors = [];
+  const indices = [];
+  let vertexCount = 0;
+
+  for (let y = startY; y < endY; y++) {
+    for (let z = startZ; z < endZ; z++) {
+      for (let x = startX; x < endX; x++) {
+        const type = getBlock(x, y, z);
+        if (type === BLOCK.AIR) {
+          continue;
         }
+
+        colorScratch.setHex(BLOCK_COLORS[type]);
+
+        for (const face of FACE_DEFS) {
+          const nx = x + face.normal[0];
+          const ny = y + face.normal[1];
+          const nz = z + face.normal[2];
+          if (getBlock(nx, ny, nz) !== BLOCK.AIR) {
+            continue;
+          }
+
+          for (const corner of face.corners) {
+            positions.push(x + corner[0], y + corner[1], z + corner[2]);
+            colors.push(colorScratch.r, colorScratch.g, colorScratch.b);
+          }
+
+          indices.push(
+            vertexCount,
+            vertexCount + 1,
+            vertexCount + 2,
+            vertexCount,
+            vertexCount + 2,
+            vertexCount + 3
+          );
+          vertexCount += 4;
+        }
+      }
+    }
+  }
+
+  if (vertexCount === 0) {
+    return null;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function rebuildChunk(cx, cy, cz) {
+  if (!validChunk(cx, cy, cz)) {
+    return;
+  }
+
+  const ci = chunkIndex(cx, cy, cz);
+  const oldMesh = chunkMeshes[ci];
+  if (oldMesh) {
+    chunkGroup.remove(oldMesh);
+    oldMesh.geometry.dispose();
+    chunkMeshes[ci] = null;
+  }
+
+  const geometry = buildChunkGeometry(cx, cy, cz);
+  if (!geometry) {
+    return;
+  }
+
+  const mesh = new THREE.Mesh(geometry, chunkMaterial);
+  mesh.name = `chunk-${cx}-${cy}-${cz}`;
+  mesh.userData.chunk = { cx, cy, cz };
+  chunkGroup.add(mesh);
+  chunkMeshes[ci] = mesh;
+}
+
+function rebuildAllChunks() {
+  for (let cy = 0; cy < CHUNK_Y; cy++) {
+    for (let cz = 0; cz < CHUNK_Z; cz++) {
+      for (let cx = 0; cx < CHUNK_X; cx++) {
+        rebuildChunk(cx, cy, cz);
       }
     }
   }
 }
 
-function addMeshForBlock(x, y, z, type) {
-  const mesh = new THREE.Mesh(cubeGeometry, materials[type]);
-  mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
-  mesh.userData.blockPos = { x, y, z };
-  blockGroup.add(mesh);
-  meshesByCell.set(key(x, y, z), mesh);
-}
-
-function removeMeshForBlock(x, y, z) {
-  const k = key(x, y, z);
-  const mesh = meshesByCell.get(k);
-  if (!mesh) {
-    return;
+function addDirtyChunk(dirtySet, cx, cy, cz) {
+  if (validChunk(cx, cy, cz)) {
+    dirtySet.add(chunkKey(cx, cy, cz));
   }
-  blockGroup.remove(mesh);
-  meshesByCell.delete(k);
 }
 
-rebuildWorldMeshes();
+function markChunkDirtyForBlock(x, y, z, dirtySet) {
+  const cx = chunkCoord(x);
+  const cy = chunkCoord(y);
+  const cz = chunkCoord(z);
+
+  addDirtyChunk(dirtySet, cx, cy, cz);
+
+  const lx = x % CHUNK_SIZE;
+  const ly = y % CHUNK_SIZE;
+  const lz = z % CHUNK_SIZE;
+
+  if (lx === 0) addDirtyChunk(dirtySet, cx - 1, cy, cz);
+  if (lx === CHUNK_SIZE - 1) addDirtyChunk(dirtySet, cx + 1, cy, cz);
+  if (ly === 0) addDirtyChunk(dirtySet, cx, cy - 1, cz);
+  if (ly === CHUNK_SIZE - 1) addDirtyChunk(dirtySet, cx, cy + 1, cz);
+  if (lz === 0) addDirtyChunk(dirtySet, cx, cy, cz - 1);
+  if (lz === CHUNK_SIZE - 1) addDirtyChunk(dirtySet, cx, cy, cz + 1);
+}
+
+function applyBlockChange(x, y, z, newType) {
+  if (!inBounds(x, y, z)) {
+    return false;
+  }
+
+  const cell = idx(x, y, z);
+  if (world[cell] === newType) {
+    return false;
+  }
+
+  world[cell] = newType;
+
+  const dirtySet = new Set();
+  markChunkDirtyForBlock(x, y, z, dirtySet);
+  for (const key of dirtySet) {
+    const { cx, cy, cz } = parseChunkKey(key);
+    rebuildChunk(cx, cy, cz);
+  }
+
+  return true;
+}
+
+generateWorld();
+rebuildAllChunks();
 
 const selectedLabel = document.getElementById("selectedBlock");
+const fpsLabel = document.getElementById("fpsValue");
+const audioMutedLabel = document.getElementById("audioMuted");
+const volumeValueLabel = document.getElementById("volumeValue");
+const volumeSlider = document.getElementById("volumeSlider");
 const helpPanel = document.getElementById("help");
 const lockHint = document.getElementById("lockHint");
 
@@ -204,7 +425,141 @@ function updateSelectionHud() {
   selectedLabel.textContent = `${selectedBlock} (${BLOCK_NAMES[selectedBlock]})`;
 }
 
+let audioContext = null;
+let masterGain = null;
+let noiseBuffer = null;
+let muted = false;
+let volume = 0.8;
+const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+
+function updateAudioHud() {
+  audioMutedLabel.textContent = muted ? "Muted" : "Unmuted";
+  volumeValueLabel.textContent = `${Math.round(volume * 100)}%`;
+  volumeSlider.value = String(Math.round(volume * 100));
+}
+
+function createNoiseBuffer(ctx) {
+  const duration = 0.2;
+  const length = Math.floor(ctx.sampleRate * duration);
+  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i++) {
+    data[i] = Math.random() * 2 - 1;
+  }
+  return buffer;
+}
+
+function updateMasterGain() {
+  if (!masterGain || !audioContext) {
+    return;
+  }
+  const target = muted ? 0 : volume;
+  masterGain.gain.cancelScheduledValues(audioContext.currentTime);
+  masterGain.gain.setTargetAtTime(target, audioContext.currentTime, 0.01);
+}
+
+function initializeAudioOnGesture() {
+  if (!AudioContextCtor) {
+    return;
+  }
+
+  if (!audioContext) {
+    audioContext = new AudioContextCtor();
+    masterGain = audioContext.createGain();
+    masterGain.connect(audioContext.destination);
+    noiseBuffer = createNoiseBuffer(audioContext);
+    updateMasterGain();
+    return;
+  }
+
+  if (audioContext.state === "suspended") {
+    audioContext.resume();
+  }
+}
+
+function setMuted(nextMuted) {
+  muted = nextMuted;
+  updateMasterGain();
+  updateAudioHud();
+}
+
+function toggleMute() {
+  setMuted(!muted);
+}
+
+function setVolume(nextVolume) {
+  volume = Math.min(1, Math.max(0, nextVolume));
+  updateMasterGain();
+  updateAudioHud();
+}
+
+function playPlaceSound(type) {
+  if (!audioContext || !masterGain || muted) {
+    return;
+  }
+
+  const now = audioContext.currentTime;
+  const osc = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  const filter = audioContext.createBiquadFilter();
+
+  const base = 150 + type * 16;
+  osc.type = "triangle";
+  osc.frequency.setValueAtTime(base, now);
+  osc.frequency.exponentialRampToValueAtTime(base * 0.7, now + 0.07);
+
+  filter.type = "lowpass";
+  filter.frequency.setValueAtTime(1800, now);
+
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.06, now + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(masterGain);
+
+  osc.start(now);
+  osc.stop(now + 0.1);
+}
+
+function playBreakSound(type) {
+  if (!audioContext || !masterGain || !noiseBuffer || muted) {
+    return;
+  }
+
+  const now = audioContext.currentTime;
+  const src = audioContext.createBufferSource();
+  const filter = audioContext.createBiquadFilter();
+  const gain = audioContext.createGain();
+
+  const profile = BREAK_SOUND_PROFILE[type] || BREAK_SOUND_PROFILE[BLOCK.STONE];
+
+  src.buffer = noiseBuffer;
+
+  filter.type = "bandpass";
+  filter.frequency.setValueAtTime(profile.cutoff, now);
+  filter.Q.setValueAtTime(profile.q, now);
+
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(profile.gain, now + 0.004);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + profile.decay);
+
+  src.connect(filter);
+  filter.connect(gain);
+  gain.connect(masterGain);
+
+  src.start(now);
+  src.stop(now + profile.decay + 0.02);
+}
+
 updateSelectionHud();
+updateAudioHud();
+
+volumeSlider.addEventListener("input", (e) => {
+  initializeAudioOnGesture();
+  setVolume(Number(e.target.value) / 100);
+});
 
 const player = {
   pos: new THREE.Vector3(8, WORLD_Y - 2, 8),
@@ -251,6 +606,7 @@ const keys = {
 let pointerLocked = false;
 
 renderer.domElement.addEventListener("click", () => {
+  initializeAudioOnGesture();
   renderer.domElement.requestPointerLock();
 });
 
@@ -286,8 +642,14 @@ window.addEventListener("keydown", (e) => {
     helpPanel.classList.toggle("hidden");
   }
 
-  if (/^Digit[1-6]$/.test(e.code)) {
-    selectedBlock = Number(e.code.slice(5));
+  if (e.code === "KeyM") {
+    initializeAudioOnGesture();
+    toggleMute();
+  }
+
+  if (/^Digit[0-9]$/.test(e.code)) {
+    const digit = Number(e.code.slice(5));
+    selectedBlock = digit === 0 ? 10 : digit;
     updateSelectionHud();
   }
 });
@@ -298,33 +660,42 @@ window.addEventListener("keyup", (e) => {
   }
 });
 
-window.addEventListener("contextmenu", (e) => {
+renderer.domElement.addEventListener("contextmenu", (e) => {
   e.preventDefault();
 });
 
 const raycaster = new THREE.Raycaster();
+raycaster.far = REACH;
+const centerScreen = new THREE.Vector2(0, 0);
 
 function getTargetedBlock() {
-  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-  const hits = raycaster.intersectObjects(blockGroup.children, false);
+  raycaster.setFromCamera(centerScreen, camera);
+  const hits = raycaster.intersectObjects(chunkGroup.children, false);
 
   for (const hit of hits) {
-    if (hit.distance > REACH) {
+    if (hit.distance > REACH || !hit.face) {
       continue;
     }
 
-    const bp = hit.object.userData.blockPos;
-    if (!bp) {
+    const n = hit.face.normal;
+    const p = hit.point;
+    const epsilon = 0.001;
+
+    const hx = Math.floor(p.x - n.x * epsilon);
+    const hy = Math.floor(p.y - n.y * epsilon);
+    const hz = Math.floor(p.z - n.z * epsilon);
+
+    if (!inBounds(hx, hy, hz) || getBlock(hx, hy, hz) === BLOCK.AIR) {
       continue;
     }
 
-    const nx = bp.x + Math.round(hit.face.normal.x);
-    const ny = bp.y + Math.round(hit.face.normal.y);
-    const nz = bp.z + Math.round(hit.face.normal.z);
+    const px = Math.floor(p.x + n.x * epsilon);
+    const py = Math.floor(p.y + n.y * epsilon);
+    const pz = Math.floor(p.z + n.z * epsilon);
 
     return {
-      hit: { x: bp.x, y: bp.y, z: bp.z },
-      place: { x: nx, y: ny, z: nz },
+      hit: { x: hx, y: hy, z: hz },
+      place: { x: px, y: py, z: pz },
     };
   }
 
@@ -363,12 +734,14 @@ function tryBreakBlock() {
   }
 
   const { x, y, z } = target.hit;
-  if (getBlock(x, y, z) === BLOCK.AIR) {
+  const existingType = getBlock(x, y, z);
+  if (existingType === BLOCK.AIR) {
     return;
   }
 
-  setBlock(x, y, z, BLOCK.AIR);
-  removeMeshForBlock(x, y, z);
+  if (applyBlockChange(x, y, z, BLOCK.AIR)) {
+    playBreakSound(existingType);
+  }
 }
 
 function tryPlaceBlock() {
@@ -388,14 +761,17 @@ function tryPlaceBlock() {
     return;
   }
 
-  setBlock(x, y, z, selectedBlock);
-  addMeshForBlock(x, y, z, selectedBlock);
+  if (applyBlockChange(x, y, z, selectedBlock)) {
+    playPlaceSound(selectedBlock);
+  }
 }
 
 window.addEventListener("mousedown", (e) => {
   if (!pointerLocked) {
     return;
   }
+
+  initializeAudioOnGesture();
 
   if (e.button === 0) {
     tryBreakBlock();
@@ -498,34 +874,76 @@ function moveAndCollide(delta) {
 }
 
 const clock = new THREE.Clock();
+const forward = new THREE.Vector3();
+const right = new THREE.Vector3();
+const desiredDir = new THREE.Vector3();
+
+const fpsSamples = [];
+let fpsSampleSum = 0;
+let hudTimer = 0;
+
+function updateFps(dt) {
+  fpsSamples.push(dt);
+  fpsSampleSum += dt;
+  if (fpsSamples.length > FPS_SAMPLE_COUNT) {
+    fpsSampleSum -= fpsSamples.shift();
+  }
+
+  const fps = fpsSamples.length > 0 && fpsSampleSum > 0 ? fpsSamples.length / fpsSampleSum : 0;
+  return fps;
+}
 
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.033);
 
-  const forward = new THREE.Vector3(Math.sin(player.yaw), 0, Math.cos(player.yaw));
-  const right = new THREE.Vector3(forward.z, 0, -forward.x);
+  forward.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+  right.set(-forward.z, 0, forward.x);
 
-  const desired = new THREE.Vector3();
-  if (keys.KeyW) desired.add(forward);
-  if (keys.KeyS) desired.sub(forward);
-  if (keys.KeyD) desired.add(right);
-  if (keys.KeyA) desired.sub(right);
+  desiredDir.set(0, 0, 0);
+  if (keys.KeyW) desiredDir.add(forward);
+  if (keys.KeyS) desiredDir.sub(forward);
+  if (keys.KeyD) desiredDir.add(right);
+  if (keys.KeyA) desiredDir.sub(right);
 
-  if (desired.lengthSq() > 0) {
-    desired.normalize().multiplyScalar(MOVE_SPEED);
+  if (desiredDir.lengthSq() > 0) {
+    desiredDir.normalize();
   }
 
-  player.vel.x = desired.x;
-  player.vel.z = desired.z;
+  const accel = player.onGround ? GROUND_ACCEL : AIR_ACCEL;
+  player.vel.x += desiredDir.x * accel * dt;
+  player.vel.z += desiredDir.z * accel * dt;
 
-  player.vel.y -= GRAVITY * dt;
+  const friction = player.onGround ? GROUND_FRICTION : AIR_FRICTION;
+  const frictionScale = Math.max(0, 1 - friction * dt);
+  player.vel.x *= frictionScale;
+  player.vel.z *= frictionScale;
+
+  const hSpeed = Math.hypot(player.vel.x, player.vel.z);
+  if (hSpeed > MAX_MOVE_SPEED) {
+    const clamp = MAX_MOVE_SPEED / hSpeed;
+    player.vel.x *= clamp;
+    player.vel.z *= clamp;
+  }
+
   if (keys.Space && player.onGround) {
     player.vel.y = JUMP_SPEED;
     player.onGround = false;
   }
 
+  player.vel.y -= GRAVITY * dt;
+  if (player.vel.y < -MAX_FALL_SPEED) {
+    player.vel.y = -MAX_FALL_SPEED;
+  }
+
   moveAndCollide(dt);
   updateCamera();
+
+  const fps = updateFps(dt);
+  hudTimer += dt;
+  if (hudTimer >= HUD_UPDATE_INTERVAL) {
+    fpsLabel.textContent = fps.toFixed(1);
+    hudTimer = 0;
+  }
 
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
